@@ -8,15 +8,17 @@
 package org.opendaylight.toaster.impl;
 
 import com.google.common.base.Function;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.SettableFuture;
+import com.google.common.base.Optional;
+import com.google.common.util.concurrent.*;
 import org.opendaylight.controller.md.sal.binding.api.DataBroker;
 import org.opendaylight.controller.md.sal.binding.api.DataChangeListener;
+import org.opendaylight.controller.md.sal.binding.api.ReadWriteTransaction;
 import org.opendaylight.controller.md.sal.binding.api.WriteTransaction;
 import org.opendaylight.controller.md.sal.common.api.data.AsyncDataBroker.DataChangeScope;
 import org.opendaylight.controller.md.sal.common.api.data.AsyncDataChangeEvent;
 import org.opendaylight.controller.md.sal.common.api.data.LogicalDatastoreType;
+import org.opendaylight.controller.md.sal.common.api.data.OptimisticLockFailedException;
+import org.opendaylight.controller.md.sal.common.api.data.TransactionCommitFailedException;
 import org.opendaylight.controller.sal.binding.api.BindingAwareBroker;
 import org.opendaylight.controller.sal.binding.api.BindingAwareBroker.ProviderContext;
 import org.opendaylight.controller.sal.binding.api.BindingAwareProvider;
@@ -31,6 +33,7 @@ import org.opendaylight.yangtools.yang.common.RpcResultBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -215,7 +218,91 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
                                          final SettableFuture<RpcResult<Void>> futureResult,
                                          final int tries) {
         LOG.info("checkStatusAndMakeToast");
-        
+        final ReadWriteTransaction tx = dataService.newReadWriteTransaction();
+        ListenableFuture<Optional<Toaster>> readFuture = tx.read(LogicalDatastoreType.OPERATIONAL, TOASTER_IID);
+        final ListenableFuture<Void> commitFuture = Futures.transform(readFuture, new AsyncFunction<Optional<Toaster>, Void>() {
+            @Override
+            public ListenableFuture<Void> apply(final Optional<Toaster> toasterData) throws Exception {
+                Toaster.ToasterStatus toasterStatus = Toaster.ToasterStatus.Up;
+                if(toasterData.isPresent()){
+                    toasterStatus = toasterData.get().getToasterStatus();
+                }
+                LOG.debug("Read toaster status: {}", toasterStatus);
+                if(toasterStatus == Toaster.ToasterStatus.Up){
+                    if(outOfBread()) {
+                        LOG.debug("Toaster is out of bread");
+                        return Futures.immediateFailedCheckedFuture(new TransactionCommitFailedException("", makeToasterOutOBreadError()));
+                    }
+                    LOG.debug("Setting Toaster status to Down");
+                    tx.put(LogicalDatastoreType.OPERATIONAL, TOASTER_IID,
+                            buildToaster(Toaster.ToasterStatus.Down));
+                    return tx.submit();
+                }
+                LOG.debug("Oops - already making toast!");
+                return Futures.immediateFailedCheckedFuture(
+                        new TransactionCommitFailedException("",makeToasterInUseError()));
+            }
+        });
+        Futures.addCallback(commitFuture, new FutureCallback<Void>() {
+            @Override
+            public void onSuccess(final Void result) {
+                currentMakeToastTask.set(executor.submit(new MakeToastTask(input, futureResult)));
+            }
+
+            @Override
+            public void onFailure(final Throwable ex) {
+                if(ex instanceof OptimisticLockFailedException){
+                    if((tries - 1) > 0){
+                        LOG.debug("Got OptimisticLockFailedException - try again");
+                        checkStatusAndMakeToast(input, futureResult, tries - 1);
+                    }else {
+                        futureResult.set(RpcResultBuilder.<Void>failed()
+                        .withError(RpcError.ErrorType.APPLICATION, ex.getMessage()).build());
+                    }
+                } else {
+                    LOG.debug("Failed to commit Toaster status", ex);
+                    futureResult.set(RpcResultBuilder.<Void>failed()
+                    .withRpcErrors( ((TransactionCommitFailedException)ex).getErrorList())
+                            .build());
+                }
+            }
+        });
+    }
+
+    private class MakeToastTask implements Callable<Void>{
+        final MakeToastInput toastRequest;
+        final SettableFuture<RpcResult<Void>> futureResult;
+        public MakeToastTask(final MakeToastInput toastRequest,
+                             final SettableFuture<RpcResult<Void>> futureResult){
+            this.toastRequest = toastRequest;
+            this.futureResult = futureResult;
+        }
+
+        @Override
+        public Void call() throws Exception {
+            try {
+                long darknessFactor = ToasterProvider.this.darknessFactor.get();
+                Thread.sleep(darknessFactor * toastRequest.getToasterDoneness());
+            }catch ( InterruptedException e) {
+                LOG.info("Interrupted while making the toast");
+            }
+            toastsMade.incrementAndGet();
+            amountOfBreadInStock.getAndDecrement();
+            if(outOfBread()){
+                LOG.info("Toaster is out of bread!");
+                notificationService.publish(new ToasterOutOfBreadBuilder().build());
+            }
+            setToasterStatusUp(new Function<Boolean, Void>() {
+                @Override
+                public Void apply(Boolean aBoolean) {
+                    currentMakeToastTask.set(null);
+                    LOG.debug("Toast done");
+                    futureResult.set(RpcResultBuilder.<Void>success().build());
+                    return null;
+                }
+            });
+            return null;
+        }
     }
     @Override
     public Future<RpcResult<Void>> makeToast(final MakeToastInput input) {
