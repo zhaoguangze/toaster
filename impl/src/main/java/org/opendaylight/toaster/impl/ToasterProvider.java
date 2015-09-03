@@ -33,6 +33,8 @@ import org.opendaylight.yangtools.yang.common.RpcResultBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -89,17 +91,59 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
     @Override
     public void onDataChanged(final AsyncDataChangeEvent<InstanceIdentifier<?>, DataObject> change){
 
-        DataObject dataObject = change.getUpdatedSubtree();
+        try {
 
-        if(dataObject instanceof Toaster) {
+            //Toaster ORIGINAL
+            Map<InstanceIdentifier<?>, DataObject> dataOriginalDataObject = change.getOriginalData();
 
-            Toaster toaster = (Toaster) dataObject;
+            for(Map.Entry<InstanceIdentifier<?>, DataObject> entry : dataOriginalDataObject.entrySet()){
+                if(entry.getValue() instanceof Toaster){
 
-            LOG.info("onDataChanged - new Toaster config: {}", toaster);
+                    LOG.info("onDataChanged - ORIGINAL: {}", entry.getValue());
 
-        } else {
+                }
+            }
 
-            LOG.warn("onDataChanged - not instance of Toaster {}", dataObject);
+            //Toaster CREATION
+            Map<InstanceIdentifier<?>, DataObject> dataCreatedObject = change.getCreatedData();
+
+            for(Map.Entry<InstanceIdentifier<?>, DataObject> entry : dataCreatedObject.entrySet()){
+                if(entry.getValue() instanceof Toaster){
+
+                    LOG.info("onDataChanged - CREATION: {}", entry.getValue());
+
+                }
+            }
+
+            //Toaster DELETION
+            Set<InstanceIdentifier<?>> dataRemovedConfigurationIID = change.getRemovedPaths();
+
+            for(InstanceIdentifier<?> instanceIdentifier : dataRemovedConfigurationIID){
+                DataObject dataObject = dataOriginalDataObject.get(instanceIdentifier);
+                if(dataObject instanceof Toaster ){
+
+                    LOG.info("onDataChanged - DELETION: {}", dataObject);
+
+                }
+            }
+
+            //Toaster UPDATE
+            Map<InstanceIdentifier<?>, DataObject> dataUpdatedConfigurationObject = change.getUpdatedData();
+
+            for(Map.Entry<InstanceIdentifier<?>, DataObject> entry : dataUpdatedConfigurationObject.entrySet()){
+                if((entry.getValue() instanceof Toaster) && (!(dataCreatedObject.containsKey(entry.getKey())))){
+
+                    Toaster toaster = (Toaster) entry.getValue();
+
+                    LOG.info("onDataChanged - UPDATE: {}", toaster);
+
+                }
+
+            }
+
+        }catch (Exception e) {
+
+            e.printStackTrace();
 
         }
     }
