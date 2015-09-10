@@ -42,7 +42,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class ToasterProvider implements BindingAwareProvider,ToasterService, DataChangeListener, AutoCloseable {
+public class ToasterProvider implements BindingAwareProvider,ToasterService, ToasterListener,DataChangeListener, AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(ToasterProvider.class);
 
@@ -254,7 +254,7 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
         });
     }
 
-    private boolean outOfBread(){
+    public boolean outOfBread(){
         return amountOfBreadInStock.get() == 0;
     }
 
@@ -313,6 +313,16 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
         });
     }
 
+    @Override
+    public void onToasterOutOfBread(ToasterOutOfBread notification) {
+        notificationService.publish(notification);
+    }
+
+    @Override
+    public void onToasterRestocked(ToasterRestocked notification) {
+        notificationService.publish(notification);
+    }
+
     private class MakeToastTask implements Callable<Void>{
         final MakeToastInput toastRequest;
         final SettableFuture<RpcResult<Void>> futureResult;
@@ -334,7 +344,8 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
             amountOfBreadInStock.getAndDecrement();
             if(outOfBread()){
                 LOG.info("Toaster is out of bread!");
-                notificationService.publish(new ToasterOutOfBreadBuilder().build());
+//                notificationService.publish(new ToasterOutOfBreadBuilder().build());
+                onToasterOutOfBread(new ToasterOutOfBreadBuilder().build());
             }
             setToasterStatusUp(new Function<Boolean, Void>() {
                 @Override
@@ -364,8 +375,8 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
             ToasterRestocked reStockedNotification = new ToasterRestockedBuilder()
                     .setAmountOfBread(input.getAmountOfBreadToStock()).build();
 
-            notificationService.publish( reStockedNotification );
-
+//            notificationService.publish( reStockedNotification );
+            onToasterRestocked(reStockedNotification);
         }
         return Futures.immediateFuture(RpcResultBuilder.<Void>success().build());
     }
@@ -379,6 +390,5 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Dat
         }
         return Futures.immediateFuture(RpcResultBuilder.<Void>success().build());
     }
-
 
 }
