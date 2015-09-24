@@ -315,12 +315,12 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Toa
 
     @Override
     public void onToasterOutOfBread(ToasterOutOfBread notification) {
-        notificationService.publish(notification);
+
     }
 
     @Override
     public void onToasterRestocked(ToasterRestocked notification) {
-        notificationService.publish(notification);
+
     }
 
     private class MakeToastTask implements Callable<Void>{
@@ -344,8 +344,7 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Toa
             amountOfBreadInStock.getAndDecrement();
             if(outOfBread()){
                 LOG.info("Toaster is out of bread!");
-//                notificationService.publish(new ToasterOutOfBreadBuilder().build());
-                onToasterOutOfBread(new ToasterOutOfBreadBuilder().build());
+                notificationService.publish(new ToasterOutOfBreadBuilder().build());
             }
             setToasterStatusUp(new Function<Boolean, Void>() {
                 @Override
@@ -375,8 +374,7 @@ public class ToasterProvider implements BindingAwareProvider,ToasterService, Toa
             ToasterRestocked reStockedNotification = new ToasterRestockedBuilder()
                     .setAmountOfBread(input.getAmountOfBreadToStock()).build();
 
-//            notificationService.publish( reStockedNotification );
-            onToasterRestocked(reStockedNotification);
+            notificationService.publish( reStockedNotification );
         }
         return Futures.immediateFuture(RpcResultBuilder.<Void>success().build());
     }
